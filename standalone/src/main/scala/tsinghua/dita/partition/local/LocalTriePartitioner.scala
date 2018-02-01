@@ -31,12 +31,17 @@ case class LocalTriePartitioner(partitioner: STRPartitioner,
 
   override def getPartition(key: Any): Int = {
     val k = LocalTriePartitioner.getIndexedKey(key)
-    val x = partitioner.getPartition(k.head)
-    if (childPartitioners.nonEmpty) {
-      val y = childPartitioners(x).getPartition(k.tail)
-      totalPartitions(x) + y
-    } else {
-      x
+    //修改
+    if(k.isEmpty)
+      0
+    else {
+      val x = partitioner.getPartition(k.head)
+      if (childPartitioners.nonEmpty) {
+        val y = childPartitioners(x).getPartition(k.tail)
+        totalPartitions(x) + y
+      } else {
+        x
+      }
     }
   }
 
@@ -201,7 +206,7 @@ object LocalTriePartitioner {
     }
 
     if (level > 1) {
-      val rddWithKey = rdd.map(x => (x._1.head, (x._1.tail, x._2)))
+      val rddWithKey = rdd.filter(_._1.nonEmpty).map(x => (x._1.head, (x._1.tail, x._2)))  //过滤一下
       // println(numPartitions)
       val (partitionedData, partitioner) = LocalSTRPartitioner.partition(rddWithKey, dimension, numPartitions)
 
@@ -210,7 +215,7 @@ object LocalTriePartitioner {
 
       LocalTriePartitioner(partitioner, childPartitioners, level, rdd.length, None)
     } else {
-      val rddWithoutKey = rdd.map(x => (x._1.head, x._2))
+      val rddWithoutKey = rdd.filter(_._1.nonEmpty).map(x => (x._1.head, x._2)) //过滤一下
       val (partitionedData, partitioner) = LocalSTRPartitioner.partition(rddWithoutKey,
         dimension, numPartitions)
 

@@ -71,7 +71,7 @@ object TrajectorySimilarityWithKNNAlgorithms {
     }
   }
 
-  object DistributedSearch extends Logging {
+  object DistributedSearch {//extends Logging {
     implicit val order = new Ordering[(Trajectory, Double)] {
       def compare(x: (Trajectory, Double), y: (Trajectory, Double)): Int = {
         x._2.compare(y._2)
@@ -84,17 +84,17 @@ object TrajectorySimilarityWithKNNAlgorithms {
       val threshold = trieRDD.packedRDD.mapPartitions(iter =>
         getThresholdLocal(iter, Iterator(query), distanceFunction, count, Double.MaxValue))
         .collect().sorted.take(count).last
-      logWarning(s"Threshold: $threshold")
+      //logWarning(s"Threshold: $threshold")
 
       val answerRDD = TrajectorySimilarityWithThresholdAlgorithms.DistributedSearch.search(
         sparkContext, query, trieRDD, distanceFunction, threshold)
-      logWarning(s"Answer Count: ${answerRDD.count()}")
+//      logWarning(s"Answer Count: ${answerRDD.count()}")
 
       sparkContext.parallelize(answerRDD.takeOrdered(count))
     }
   }
 
-  object DistributedJoin extends Logging {
+  object DistributedJoin {//extends Logging {
     implicit val order = new Ordering[(Trajectory, Trajectory, Double)] {
       def compare(x: (Trajectory, Trajectory, Double), y: (Trajectory, Trajectory, Double)): Int = {
         x._3.compare(y._3)
@@ -105,10 +105,10 @@ object TrajectorySimilarityWithKNNAlgorithms {
              distanceFunction: TrajectorySimilarity,
              count: Int): RDD[(Trajectory, Trajectory, Double)] = {
       val threshold = getThreshold(sparkContext, leftTrieRDD, rightTrieRDD, distanceFunction, count)
-      logWarning(s"Threshold: $threshold")
+//      logWarning(s"Threshold: $threshold")
       val answerRDD = TrajectorySimilarityWithThresholdAlgorithms.SimpleDistributedJoin
         .join(sparkContext, leftTrieRDD, rightTrieRDD, distanceFunction, threshold)
-      logWarning(s"Answer Count: ${answerRDD.count()}")
+//      logWarning(s"Answer Count: ${answerRDD.count()}")
       sparkContext.parallelize(answerRDD.takeOrdered(count))
     }
 

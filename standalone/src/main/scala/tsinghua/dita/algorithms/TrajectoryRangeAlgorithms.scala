@@ -36,7 +36,7 @@ object TrajectoryRangeAlgorithms {
     answers.iterator
   }
 
-  object DistributedSearch extends Logging {
+  object DistributedSearch {//extends Logging {
     def search(sparkContext: SparkContext, query: Shape, trieRDD: TrieRDD,
                threshold: Double): RDD[Trajectory] = {
       val bQuery = sparkContext.broadcast(query)

@@ -16,7 +16,7 @@
 
 package tsinghua.dita.algorithms
 
-import org.apache.spark.internal.Logging
+//import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.{PartitionPruningRDD, RDD}
 import org.apache.spark.{Accumulable, SparkContext}
 import tsinghua.dita.common.DITAConfigConstants
@@ -33,25 +33,74 @@ import scala.util.control.Breaks
 
 object TrajectorySimilarityWithThresholdAlgorithms {
 
-  def localJoin(partitionIter: Iterator[PackedPartition],
-           trajectoryIter: Iterator[Trajectory],
+  def localJoin_1(partitionIter: PackedPartition,
+           trajectoryIter: Trajectory,
            distanceFunction: TrajectorySimilarity,
-           threshold: Double): Iterator[(Trajectory, Trajectory, Double)] = {
+           threshold: Double): (Iterator[(Trajectory, Trajectory, Double)],Int) = {
+
+    val packedPartition = partitionIter
+    val localIndex = packedPartition.indexes.filter(_.isInstanceOf[LocalTrieIndex]).head
+      .asInstanceOf[LocalTrieIndex]
+    val queryTrajectories = trajectoryIter
+    queryTrajectories.refresh(threshold)
+//    queryTrajectories.foreach(_.refresh(threshold))
+
+
+      val indexCandidates = localIndex.getCandidates(queryTrajectories, distanceFunction, threshold)
+      val mbrCandidates = indexCandidates.filter(t => queryTrajectories.getExtendedMBR.contains(t.getMBR))
+
+
+//      val answerPairs = candidates.flatMap(it => {
+//      it._2.map(t => (t, distanceFunction.evalWithTrajectory(it._1, t, threshold)))
+//        .filter(t => t._2 <= threshold)
+//        .map(t => (it._1, t._1, t._2))
+//    })
+        val answerPairs = mbrCandidates.map(t=>(t, distanceFunction.evalWithTrajectory(queryTrajectories, t, threshold))).filter(t=>t._2<=threshold).map(t=>(queryTrajectories,t._1,t._2))
+
+    (answerPairs.iterator,mbrCandidates.size)
+  }
+  def localJoin_2(partitionIter: PackedPartition,
+                trajectoryIter: Iterator[Trajectory],
+                distanceFunction: TrajectorySimilarity,
+                threshold: Double): Iterator[(Trajectory, Trajectory, Double)] = {
+    val packedPartition = partitionIter
+    val localIndex = packedPartition.indexes.filter(_.isInstanceOf[LocalTrieIndex]).head
+      .asInstanceOf[LocalTrieIndex]
+    val queryTrajectories = trajectoryIter.toList
+    queryTrajectories.foreach(_.refresh(threshold))
+
+    val candidates = queryTrajectories.map(query=>{
+      val indexCandidates = localIndex.getCandidates(query, distanceFunction, threshold)
+      val mbrCandidates = indexCandidates.filter(t => query.getExtendedMBR.contains(t.getMBR))
+      (query,mbrCandidates)
+    })
+    candidates.flatMap(it => {
+      it._2.map(t => (t, distanceFunction.evalWithTrajectory(it._1, t, threshold)))
+        .filter(t => t._2 <= threshold)
+        .map(t => (it._1, t._1, t._2))
+    }).iterator
+  }
+  def localJoin(partitionIter: Iterator[PackedPartition],
+                  trajectoryIter: Iterator[Trajectory],
+                  distanceFunction: TrajectorySimilarity,
+                  threshold: Double): Iterator[(Trajectory, Trajectory, Double)] = {
     val packedPartition = partitionIter.next()
     val localIndex = packedPartition.indexes.filter(_.isInstanceOf[LocalTrieIndex]).head
       .asInstanceOf[LocalTrieIndex]
     val queryTrajectories = trajectoryIter.toList
     queryTrajectories.foreach(_.refresh(threshold))
 
-    val answerPairs = queryTrajectories.flatMap(query => {
+    val candidates = queryTrajectories.map(query=>{
       val indexCandidates = localIndex.getCandidates(query, distanceFunction, threshold)
       val mbrCandidates = indexCandidates.filter(t => query.getExtendedMBR.contains(t.getMBR))
-      mbrCandidates.map(t => (t, distanceFunction.evalWithTrajectory(query, t, threshold)))
-        .filter(t => t._2 <= threshold)
-        .map(t => (query, t._1, t._2))
+      (query,mbrCandidates)
     })
 
-    answerPairs.iterator
+   candidates.flatMap(it => {
+      it._2.map(t => (t, distanceFunction.evalWithTrajectory(it._1, t, threshold)))
+        .filter(t => t._2 <= threshold)
+        .map(t => (it._1, t._1, t._2))
+    }).iterator
   }
 
   object DistributedSearch {
@@ -66,6 +115,111 @@ object TrajectorySimilarityWithThresholdAlgorithms {
         .mapPartitions(iter =>
           localJoin(iter, Iterator(bQuery.value), distanceFunction, threshold)
             .map(x => (x._2, x._3)))
+    }
+
+    def  batchSearch(sparkContext: SparkContext, querys: Array[Trajectory], packedRDD: RDD[PackedPartition],globalTrieIndex: GlobalTrieIndex,
+                    distanceFunction: TrajectorySimilarity,
+                    threshold: Double) = {
+        val bQuery = sparkContext.broadcast(querys)
+        val candidates = querys.map(globalTrieIndex.getPartitions(_,distanceFunction,threshold))
+       //candidates.flatMap(s=>s.toArray).toSet
+        val candidates_map = candidates.zipWithIndex.flatMap(t=>t._1.map(s=>(s,t._2))).groupBy(_._1)
+        val candidates_all = candidates_map.map(_._1).toList
+        val bCanMap = sparkContext.broadcast(candidates_map)
+//      println(s"ok1,candidates number is:${candidates_all.length}")
+//      val globalPruneNum = sparkContext.collectionAccumulator[Int]("globalPrune")
+//      val globalEmptyNum = sparkContext.collectionAccumulator[Int]("globalEmpty")
+       val res=  PartitionPruningRDD.create(packedRDD,candidates_all.contains).mapPartitions(id=> {
+          if(!id.hasNext) {
+//            globalEmptyNum.add(1)
+            Iterator()
+          }
+          else {
+            val pack = id.next()
+            val trajs_nums = bCanMap.value.get(pack.id) //.get
+            if (trajs_nums.isEmpty) {
+//              globalPruneNum.add(pack.id)
+              Iterator()
+            }
+            else {
+              val query_s = bQuery.value//.zipWithIndex.filter(s => trajs_nums.get.contains(s._2)).map(_._1)
+//              globalPruneNum.add(query_s.length)
+              localJoin_2(pack, query_s.iterator, distanceFunction, threshold).map(x => (x._1, x._2))
+            }
+          }
+        }
+        ).count()//.collect()
+//      val global_sum = {
+////        val s = globalPruneNum.value
+//        var p = 0.0
+//        val it  = s.iterator()
+//        while(it.hasNext) {
+//          p += it.next()
+//        }
+//        p
+//      }
+//      val global_empty = {
+//        val s = globalEmptyNum.value
+//        var p = 0.0
+//        val it  = s.iterator()
+//        while(it.hasNext) {
+//          p += it.next()
+//        }
+//        p
+//      }
+//      println(s"empty num is ${global_empty}")
+//      println(s"num is ${global_sum}")
+      res
+    }
+
+    def search_1(sparkContext: SparkContext, query: Trajectory, packedRDD: RDD[PackedPartition],globalTrieIndex: GlobalTrieIndex,
+               distanceFunction: TrajectorySimilarity,
+               threshold: Double) = {
+      val global_start = System.nanoTime()
+      val bQuery = sparkContext.broadcast(query)
+//      val globalTrieIndex = trieRDD.globalIndex.asInstanceOf[GlobalTrieIndex]
+      val candidatePartitions = globalTrieIndex.getPartitions(query, distanceFunction, threshold)
+      val global_prune_end = System.nanoTime()
+      val globalPruneNum = sparkContext.collectionAccumulator[Int]("globalPrune")
+      val localPruneNum = sparkContext.collectionAccumulator[Int]("localPrune")
+      val res = PartitionPruningRDD.create(packedRDD, candidatePartitions.contains)
+        .mapPartitions(iter => {
+          if(!iter.hasNext){
+            Iterator()
+          }else {
+            val pack = iter.next()
+            globalPruneNum.add(pack.data.length)
+            val local = localJoin_1(pack, bQuery.value, distanceFunction, threshold)
+            localPruneNum.add(local._2)
+            local._1.map(x => (x._2, x._3))
+          }})
+      val local_prune_refine = System.nanoTime()
+      val res_arr = res.collect()
+      val collect_end = System.nanoTime()
+      val global_sum = {
+        val s = globalPruneNum.value
+        var p = 0.0
+        val it  = s.iterator()
+        while(it.hasNext) {
+          p += it.next()
+        }
+        p
+      }
+      val local_sum = {
+        val s = localPruneNum.value
+        var p = 0.0
+        val it = s.iterator()
+        while(it.hasNext){
+          p += it.next()
+        }
+        p
+      }
+
+      val global_prune_cost = (global_prune_end-global_start)*1.0/1000000
+      val collect_cost = (collect_end-local_prune_refine)*1.0/1000000
+      val all_cost = (collect_end-global_start)*1.0/1000000
+      val global_information = Array(all_cost,global_prune_cost,collect_cost,global_sum,local_sum)
+      (res_arr,global_information)
     }
   }
 
@@ -171,7 +325,7 @@ object TrajectorySimilarityWithThresholdAlgorithms {
     }
   }
 
-  object FineGrainedDistributedJoin extends DistributedJoin with Logging {
+  object FineGrainedDistributedJoin extends DistributedJoin {
     val LAMBDA: Double = 2.0
 
     override def join(sparkContext: SparkContext, leftTrieRDD: TrieRDD, rightTrieRDD: TrieRDD,
@@ -187,10 +341,11 @@ object TrajectorySimilarityWithThresholdAlgorithms {
       start = System.currentTimeMillis()
       val (transCost, compCost) = getCost(sparkContext, leftTrieRDD, rightTrieRDD, distanceFunction, threshold)
       end = System.currentTimeMillis()
-      logWarning(s"Computing cost time: ${(end - start) / 1000}s")
+      println(s"Computing cost time: ${(end - start) / 1000}s")
 
       // construct the graph
       start = System.currentTimeMillis()
+      val globalPruneNum = sparkContext.collectionAccumulator[Int]("globalPrune")
       val totalNumPartitions = leftNumPartitions + rightNumPartitions
       val allEdges = (0 until totalNumPartitions).map(partitionId => {
         val edges = if (partitionId < leftNumPartitions) {
@@ -210,9 +365,19 @@ object TrajectorySimilarityWithThresholdAlgorithms {
             (leftPartitionId, (transWeight, compWeight))
           })
         }
+        globalPruneNum.add(edges.size)
         (partitionId, edges)
       }).toMap
-
+      val global_sum = {
+        val s = globalPruneNum.value
+        var p = 0.0
+        val it  = s.iterator()
+        while(it.hasNext) {
+          p += it.next()
+        }
+        p
+      }
+      println(s"all edges' length: ${global_sum}")
       // employ graph orientation and load balancing
       val (edgeDirection, balancingPartitions) = balanceGraph(allEdges, totalNumPartitions)
       val left2RightEdges = edgeDirection.flatMap(x => {
@@ -237,7 +402,7 @@ object TrajectorySimilarityWithThresholdAlgorithms {
       // assert(left2RightEdges.forall(t => !right2LeftEdges.contains((t._2, t._1))))
       // assert(right2LeftEdges.forall(t => !left2RightEdges.contains((t._2, t._1))))
       end = System.currentTimeMillis()
-      logWarning(s"Computing optimal graph time: ${(end - start) / 1000}s")
+     println(s"Computing optimal graph time: ${(end - start) / 1000}s")
 
       // get balancing partitions
       val leftBalancingPartitions = balancingPartitions
@@ -282,22 +447,26 @@ object TrajectorySimilarityWithThresholdAlgorithms {
       val sampledLeftCandidatesRDD = leftTrieRDD.packedRDD.flatMap(packedPartition =>
         packedPartition.getSample(balancingSampleRate).asInstanceOf[List[Trajectory]].flatMap(t => {
           val candidatePartitionIdxs = bRightGlobalTrieIndex.value.getPartitions(t, distanceFunction, threshold)
-          candidatePartitionIdxs.foreach(candidatePartitionIdx =>
-            transCost.add((s"L${packedPartition.id}-R$candidatePartitionIdx", 1)))
+          candidatePartitionIdxs.foreach(candidatePartitionIdx => {
+            transCost.add((s"L${packedPartition.id}-R$candidatePartitionIdx", 1))
+            transCost.add((s"R${packedPartition.id}-L$candidatePartitionIdx", 1))
+          }
+          )
           candidatePartitionIdxs.map(candidatePartitionIdx => (candidatePartitionIdx, t))
         })
       )
       sampledLeftCandidatesRDD.count()
 
-      val sampledRightCandidatesRDD = rightTrieRDD.packedRDD.flatMap(packedPartition =>
-        packedPartition.getSample(balancingSampleRate).asInstanceOf[List[Trajectory]].flatMap(t => {
-          val candidatePartitionIdxs = bLeftGlobalTrieIndex.value.getPartitions(t, distanceFunction, threshold)
-          candidatePartitionIdxs.foreach(candidatePartitionIdx =>
-            transCost.add((s"R${packedPartition.id}-L$candidatePartitionIdx", 1)))
-          candidatePartitionIdxs.map(candidatePartitionIdx => (candidatePartitionIdx, t))
-        })
-      )
-      sampledLeftCandidatesRDD.count()
+//      val sampledRightCandidatesRDD = rightTrieRDD.packedRDD.flatMap(packedPartition =>
+//        packedPartition.getSample(balancingSampleRate).asInstanceOf[List[Trajectory]].flatMap(t => {
+//          val candidatePartitionIdxs = bLeftGlobalTrieIndex.value.getPartitions(t, distanceFunction, threshold)
+//          candidatePartitionIdxs.foreach(candidatePartitionIdx =>
+//            transCost.add((s"R${packedPartition.id}-L$candidatePartitionIdx", 1)))
+//          candidatePartitionIdxs.map(candidatePartitionIdx => (candidatePartitionIdx, t))
+//        })
+//      )
+//      sampledLeftCandidatesRDD.count()
+      val sampledRightCandidatesRDD = sampledLeftCandidatesRDD
 
       // get sampled joined data and compute computation cost
       val partitionedSampledRightCandidatesRDD = ExactKeyPartitioner.partitionWithToZipRDD(
@@ -358,7 +527,7 @@ object TrajectorySimilarityWithThresholdAlgorithms {
       val totalCost = (0 until totalNumPartitions).map(partitionId1 =>
         getTotalCostForPartition(partitionId1, allEdges, edgeDirection)
       ).toArray
-      logWarning(s"Initial maximum total cost: ${totalCost.max}")
+//      logWarning(s"Initial maximum total cost: ${totalCost.max}")
 
       // greedy algorithm for chaning edge direction
       val loop = new Breaks
@@ -400,7 +569,7 @@ object TrajectorySimilarityWithThresholdAlgorithms {
           }
         }
       }
-      logWarning(s"Maximum total cost: ${totalCost.max}")
+//      logWarning(s"Maximum total cost: ${totalCost.max}")
 
       // balancing
       val sortedTotalCost = totalCost.sorted

@@ -29,10 +29,17 @@ import tsinghua.dita.partition.global.GlobalTriePartitioner
 import scala.collection.mutable.ArrayBuffer
 
 class TrieRDD(dataRDD: RDD[Trajectory]) {
+
   val LOG: Logger = LoggerFactory.getLogger(getClass)
 
   var packedRDD: RDD[PackedPartition] = _
   var globalIndex: GlobalIndex = _
+
+  def update(packedRDD1: RDD[PackedPartition],globalIndex1: GlobalIndex) = {
+    packedRDD = packedRDD1
+    globalIndex = globalIndex1
+  }
+
 
   private def buildIndex(): Unit = {
     var start = System.currentTimeMillis()
@@ -42,7 +49,7 @@ class TrieRDD(dataRDD: RDD[Trajectory]) {
     start = System.currentTimeMillis()
     val (partitionedRDD, partitioner) = GlobalTriePartitioner.partition(dataRDD)
     end = System.currentTimeMillis()
-    LOG.warn(s"Trie Partitioning Time: ${end - start} ms")
+//    LOG.warn(s"Trie Partitioning Time: ${end - start} ms")
 
     // build local index
     start = System.currentTimeMillis()
@@ -55,21 +62,21 @@ class TrieRDD(dataRDD: RDD[Trajectory]) {
     packedRDD.persist(StorageLevel.MEMORY_AND_DISK_SER)
     packedRDD.count()
     end = System.currentTimeMillis()
-    LOG.warn(s"Building Local Index Time: ${end - start} ms")
-
-    // log statistics
-    val partitionSizes = packedRDD.mapPartitions(iter => iter.map(_.data.length)).collect()
-    LOG.warn(s"Tree Partitions Count: ${partitionSizes.length}")
-    LOG.warn(s"Tree Partitions Sizes: ${partitionSizes.mkString(",")}")
-    LOG.warn(s"Max Partition Size: ${partitionSizes.max}")
-    LOG.warn(s"Min Partition Size: ${partitionSizes.min}")
-    LOG.warn(s"Avg Partition Size: ${partitionSizes.sum / partitionSizes.length}")
-    val sortedPartitionSizes = partitionSizes.sorted
-    LOG.warn(s"5% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.05).toInt)}")
-    LOG.warn(s"25% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.25).toInt)}")
-    LOG.warn(s"50% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.5).toInt)}")
-    LOG.warn(s"75% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.75).toInt)}")
-    LOG.warn(s"95% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.95).toInt)}")
+//    LOG.warn(s"Building Local Index Time: ${end - start} ms")
+//
+//    // log statistics
+//    val partitionSizes = packedRDD.mapPartitions(iter => iter.map(_.data.length)).collect()
+//    LOG.warn(s"Tree Partitions Count: ${partitionSizes.length}")
+//    LOG.warn(s"Tree Partitions Sizes: ${partitionSizes.mkString(",")}")
+//    LOG.warn(s"Max Partition Size: ${partitionSizes.max}")
+//    LOG.warn(s"Min Partition Size: ${partitionSizes.min}")
+//    LOG.warn(s"Avg Partition Size: ${partitionSizes.sum / partitionSizes.length}")
+//    val sortedPartitionSizes = partitionSizes.sorted
+//    LOG.warn(s"5% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.05).toInt)}")
+//    LOG.warn(s"25% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.25).toInt)}")
+//    LOG.warn(s"50% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.5).toInt)}")
+//    LOG.warn(s"75% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.75).toInt)}")
+//    LOG.warn(s"95% Partition Size: ${sortedPartitionSizes((partitionSizes.length * 0.95).toInt)}")
 
     // build global index
     start = System.currentTimeMillis()
@@ -79,5 +86,6 @@ class TrieRDD(dataRDD: RDD[Trajectory]) {
     LOG.warn(s"Building Global Index Time: ${end - start} ms")
   }
 
-  buildIndex()
+
+//  buildIndex()
 }

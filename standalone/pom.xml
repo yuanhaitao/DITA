@@ -12,7 +12,7 @@
         <maven.compiler.target>1.8</maven.compiler.target>
         <encoding>UTF-8</encoding>
         <scala.tools.version>2.10</scala.tools.version>
-        <scala.version>2.10.4</scala.version>
+        <scala.version>2.11.8</scala.version>
     </properties>
     
     <repositories>
@@ -54,7 +54,7 @@
                         </goals>
                         <configuration>
                             <args>
-                                <arg>-make:transitive</arg>
+                                <!--<arg>-make:transitive</arg>-->
                                 <arg>-dependencyfile</arg>
                                 <arg>${project.build.directory}/.scala_dependencies</arg>
                             </args>
@@ -111,20 +111,20 @@
 
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-core_2.10</artifactId>
-            <version>2.2.0</version>
+            <artifactId>spark-core_2.11</artifactId>
+            <version>2.1.0</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.spark</groupId>
-            <artifactId>spark-sql_2.10</artifactId>
-            <version>2.2.0</version>
+            <artifactId>spark-sql_2.11</artifactId>
+            <version>2.1.0</version>
         </dependency>
 
         <dependency>
             <groupId>com.typesafe.scala-logging</groupId>
-            <artifactId>scala-logging-slf4j_2.10</artifactId>
-            <version>2.1.2</version>
+            <artifactId>scala-logging-slf4j_2.11</artifactId>
+            <version>2.1.0</version>
         </dependency>
 
     </dependencies>

@@ -43,8 +43,8 @@ abstract class STRPartitioner(expectedNumPartitions: Int, dimension: Int,
       recursiveGroupPoint(dimensionCount, dataBounds, data, currentBounds, 0, dimension - 1)
     } else {
       if (dataBounds == null) {
-        val min = new Array[Double](dimension).map(_ => Double.MaxValue)
-        val max = new Array[Double](dimension).map(_ => Double.MinValue)
+        val min = new Array[Double](dimension).map(_ => Double.MinValue)
+        val max = new Array[Double](dimension).map(_ => Double.MaxValue)
         Array(Rectangle(Point(min), Point(max)))
       } else {
         Array(Rectangle(Point(dataBounds.min), Point(dataBounds.max)))
